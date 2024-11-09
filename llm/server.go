@@ -188,9 +188,16 @@ func NewLlamaServer(gpus discover.GpuInfoList, model string, ggml *GGML, adapter
 		"--batch-size", strconv.Itoa(opts.NumBatch),
 	}
 
-	if opts.NumGPU >= 0 {
-		params = append(params, "--n-gpu-layers", strconv.Itoa(opts.NumGPU))
-	}
+	llamaGpuLayersOverride, ok := os.LookupEnv("LLAMA_ARG_N_GPU_LAYERS")
+  if ok {
+		slog.Info("user override", "LLAMA_ARG_N_GPU_LAYERS", llamaGpuLayersOverride)
+		params = append(params, "--n-gpu-layers", llamaGpuLayersOverride)
+  } else {
+		if opts.NumGPU >= 0 {
+			params = append(params, "--n-gpu-layers", strconv.Itoa(opts.NumGPU))
+		}
+  }
+	
 
 	if envconfig.Debug() {
 		params = append(params, "--verbose")
