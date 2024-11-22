@@ -21,6 +21,8 @@ package llama
 #cgo cuda CFLAGS: -fPIE -DGGML_USE_CUDA -DGGML_CUDA_DMMV_X=32 -DGGML_CUDA_PEER_MAX_BATCH_SIZE=128 -DGGML_CUDA_MMV_Y=1 -DGGML_BUILD=1
 #cgo cuda CXXFLAGS: -DGGML_USE_CUDA -DGGML_CUDA_DMMV_X=32 -DGGML_CUDA_PEER_MAX_BATCH_SIZE=128 -DGGML_CUDA_MMV_Y=1 -DGGML_BUILD=1
 #cgo cuda CXXFLAGS: -DGGML_USE_CUDA -DGGML_CUDA_DMMV_X=32 -DGGML_CUDA_PEER_MAX_BATCH_SIZE=128 -DGGML_CUDA_MMV_Y=1 -DGGML_BUILD=1
+#cgo cuda_jetpack5 LDFLAGS: -lggml_cuda_jetpack5 -L/usr/local/cuda-11/lib64
+#cgo cuda_jetpack6 LDFLAGS: -lggml_cuda_jetpack6 -L/usr/local/cuda-12/lib64
 #cgo cuda_v11 LDFLAGS: -lggml_cuda_v11 -L/usr/local/cuda-11/lib64
 #cgo cuda_v12 LDFLAGS: -lggml_cuda_v12 -L/usr/local/cuda-12/lib64
 #cgo darwin,amd64 CFLAGS: -Wno-incompatible-pointer-types-discards-qualifiers
@@ -36,8 +38,8 @@ package llama
 #cgo linux CXXFLAGS: -D_GNU_SOURCE
 #cgo linux,amd64 LDFLAGS: -L${SRCDIR}/build/Linux/amd64
 #cgo linux,amd64 LDFLAGS: -L${SRCDIR}/build/Linux/amd64
-#cgo linux,arm64 CFLAGS: -D__aarch64__ -D__ARM_NEON -D__ARM_FEATURE_FMA -D__ARM_FEATURE_MATMUL_INT8
-#cgo linux,arm64 CXXFLAGS: -D__aarch64__ -D__ARM_NEON -D__ARM_FEATURE_FMA -D__ARM_FEATURE_MATMUL_INT8
+#cgo linux,arm64 CFLAGS: -D__aarch64__ -D__ARM_NEON -D__ARM_FEATURE_FMA
+#cgo linux,arm64 CXXFLAGS: -D__aarch64__ -D__ARM_NEON -D__ARM_FEATURE_FMA
 #cgo linux,arm64 LDFLAGS: -L${SRCDIR}/build/Linux/arm64
 #cgo linux,arm64,sve CFLAGS: -march=armv8.6-a+sve
 #cgo linux,arm64,sve CXXFLAGS: -march=armv8.6-a+sve
@@ -155,9 +157,7 @@ type Context struct {
 	numThreads int
 }
 
-func (c *Context) KvCacheClear() {
-	C.llama_kv_cache_clear(c.c)
-}
+var ErrKvCacheFull = errors.New("could not find a kv cache slot")
 
 func (c *Context) Decode(batch *Batch) error {
 	// Positive return values does not mean a fatal error, but rather a warning.
@@ -171,7 +171,7 @@ func (c *Context) Decode(batch *Batch) error {
 	}
 
 	if code > 0 {
-		return fmt.Errorf("could not find a KV slot for the batch - try reducing the size of the batch or increase the context. code: %d", code)
+		return ErrKvCacheFull
 	}
 
 	return nil
@@ -191,6 +191,14 @@ func (c *Context) KvCacheSeqRm(seqId int, p0 int, p1 int) bool {
 
 func (c *Context) KvCacheSeqCp(srcSeqId int, dstSeqId int, p0 int, p1 int) {
 	C.llama_kv_cache_seq_cp(c.c, C.int(srcSeqId), C.int(dstSeqId), C.int(p0), C.int(p1))
+}
+
+func (c *Context) KvCacheClear() {
+	C.llama_kv_cache_clear(c.c)
+}
+
+func (c *Context) KvCacheDefrag() {
+	C.llama_kv_cache_defrag(c.c)
 }
 
 // Get the embeddings for a sequence id
@@ -382,6 +390,8 @@ func (b *Batch) Add(token int, embed []float32, pos int, logits bool, seqIds ...
 
 	if logits {
 		unsafe.Slice(b.c.logits, b.allocSize())[b.c.n_tokens] = 1
+	} else {
+		unsafe.Slice(b.c.logits, b.allocSize())[b.c.n_tokens] = 0
 	}
 
 	b.c.n_tokens += 1
@@ -596,6 +606,10 @@ func (m *MllamaContext) EmbedSize(llamaContext *Context) int {
 
 func (c *Context) SetCrossAttention(state bool) {
 	C.llama_set_cross_attention(c.c, C.bool(state))
+}
+
+func (c *Context) Synchronize() {
+	C.llama_synchronize(c.c)
 }
 
 // sampling

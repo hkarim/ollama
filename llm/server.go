@@ -313,9 +313,9 @@ func NewLlamaServer(gpus discover.GpuInfoList, model string, ggml *GGML, adapter
 
 		// Note: we always put the dependency path first
 		// since this was the exact version we compiled/linked against
-		if gpus[0].DependencyPath != "" {
+		if gpus[0].DependencyPath != nil {
 			// assume gpus from the same library have the same dependency path
-			libraryPaths = append([]string{gpus[0].DependencyPath}, libraryPaths...)
+			libraryPaths = append(gpus[0].DependencyPath, libraryPaths...)
 		}
 
 		server := filepath.Join(dir, "ollama_llama_server")
@@ -845,13 +845,15 @@ func (s *llmServer) Completion(ctx context.Context, req CompletionRequest, fn fu
 	}
 
 	if err := scanner.Err(); err != nil {
-		if strings.Contains(err.Error(), "unexpected EOF") {
+		if strings.Contains(err.Error(), "unexpected EOF") || strings.Contains(err.Error(), "forcibly closed") {
 			s.Close()
-			msg := ""
+			var msg string
 			if s.status != nil && s.status.LastErrMsg != "" {
 				msg = s.status.LastErrMsg
+			} else {
+				msg = err.Error()
 			}
-			return fmt.Errorf("an unknown error was encountered while running the model %s", msg)
+			return fmt.Errorf("an error was encountered while running the model: %s", msg)
 		}
 
 		return fmt.Errorf("error reading llm response: %v", err)
@@ -1099,7 +1101,9 @@ func (s *llmServer) EstimatedTotal() uint64 {
 func (s *llmServer) EstimatedVRAMByGPU(gpuID string) uint64 {
 	for i, gpu := range s.gpus {
 		if gpu.ID == gpuID {
-			return s.estimate.GPUSizes[i]
+			if i < len(s.estimate.GPUSizes) {
+				return s.estimate.GPUSizes[i]
+			}
 		}
 	}
 	return 0
