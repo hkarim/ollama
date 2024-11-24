@@ -104,6 +104,9 @@ func NewLlamaServer(gpus discover.GpuInfoList, model string, ggml *GGML, adapter
 	systemSwapFreeMemory = systemInfo.System.FreeSwap
 	slog.Info("system memory", "total", format.HumanBytes2(systemTotalMemory), "free", format.HumanBytes2(systemFreeMemory), "free_swap", format.HumanBytes2(systemSwapFreeMemory))
 
+	// hk: Force GPU override
+	llamaGpuLayersOverride, forceGPU := os.LookupEnv("LLAMA_ARG_N_GPU_LAYERS")
+
 	// If the user wants zero GPU layers, reset the gpu list to be CPU/system ram info
 	if opts.NumGPU == 0 {
 		gpus = discover.GetCPUInfo()
@@ -113,6 +116,11 @@ func NewLlamaServer(gpus discover.GpuInfoList, model string, ggml *GGML, adapter
 		estimate = EstimateGPULayers(gpus, ggml, projectors, opts)
 	} else {
 		estimate = EstimateGPULayers(gpus, ggml, projectors, opts)
+
+		// hk: Override the number of layers in the estimate
+		if forceGPU {
+			estimate.Layers, _ = strconv.Atoi(llamaGpuLayersOverride)
+		}
 
 		switch {
 		case gpus[0].Library == "metal" && estimate.VRAMSize > systemTotalMemory:
@@ -187,10 +195,10 @@ func NewLlamaServer(gpus discover.GpuInfoList, model string, ggml *GGML, adapter
 		"--ctx-size", strconv.Itoa(opts.NumCtx),
 		"--batch-size", strconv.Itoa(opts.NumBatch),
 	}
-
-	llamaGpuLayersOverride, ok := os.LookupEnv("LLAMA_ARG_N_GPU_LAYERS")
-  if ok {
-		slog.Info("user override", "LLAMA_ARG_N_GPU_LAYERS", llamaGpuLayersOverride)
+	
+	// hk: Add `--n-gpu-layers` flag
+  if forceGPU {
+		slog.Info("user override", "LLAMA_ARG_N_GPU_LAYERS:--n-gpu-layers", llamaGpuLayersOverride)
 		params = append(params, "--n-gpu-layers", llamaGpuLayersOverride)
   } else {
 		if opts.NumGPU >= 0 {
